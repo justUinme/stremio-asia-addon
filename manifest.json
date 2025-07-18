@@ -1,0 +1,34 @@
+{
+    "id": "com.yourname.asiaaddon",
+    "version": "1.0.0",
+    "name": "Asia Drama Addon",
+    "description": "Streams Korean and Chinese dramas",
+    "resources": ["catalog", "meta", "stream"],
+    "types": ["series"],
+    "cacheMaxAge": 3600,
+    "catalogs": [
+      {
+        "id": "kdrama",
+        "type": "series",
+        "name": "Korean Drama",
+        "extra": [
+          { "name": "search", "isRequired": false },
+          { "name": "genre", "isRequired": false, "options": ["Romance", "Action", "Comedy", "Drama", "Thriller", "Historical", "Fantasy", "Mystery", "School", "Sports", "Family", "Crime", "Medical", "Supernatural", "Music", "Sci-Fi", "War", "Business", "Political", "Adventure", "Horror"] },
+          { "name": "skip",   "isRequired": false },
+          { "name": "limit",  "isRequired": false }
+        ]
+      },
+      {
+        "id": "cdrama",
+        "type": "series",
+        "name": "Chinese Drama",
+        "extra": [
+          { "name": "search", "isRequired": false },
+          { "name": "genre", "isRequired": false, "options": ["Romance", "Action", "Comedy", "Drama", "Thriller", "Historical", "Fantasy", "Mystery", "School", "Sports", "Family", "Crime", "Medical", "Supernatural", "Music", "Sci-Fi", "War", "Business", "Political", "Adventure", "Horror"] },
+          { "name": "skip",   "isRequired": false },
+          { "name": "limit",  "isRequired": false }
+        ]
+      }
+    ]
+  }
+  

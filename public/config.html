@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Asia Drama Addon Configuration</title>
+  <style>
+    body { font-family: sans-serif; padding: 1.5rem; }
+    label { display: block; margin: 1rem 0; }
+  </style>
+</head>
+<body>
+  <h1>Addon Config</h1>
+  <label>
+    <input type="checkbox" id="enableKdrama" checked>
+    Enable Korean Drama
+  </label>
+  <label>
+    <input type="checkbox" id="enableCdrama" checked>
+    Enable Chinese Drama
+  </label>
+  <button onclick="saveConfig()">Save Settings</button>
+
+  <script>
+    function saveConfig() {
+      const cfg = {
+        kdrama: document.getElementById('enableKdrama').checked,
+        cdrama: document.getElementById('enableCdrama').checked
+      };
+      localStorage.setItem('asiaAddonConfig', JSON.stringify(cfg));
+      alert('Settings saved!');
+    }
+  </script>
+</body>
+</html>
