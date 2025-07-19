@@ -996,37 +996,45 @@ builder.defineCatalogHandler(async ({ id, search = '', extra = {} }) => {
     
     const response = await fetchJSON(url);
     
-    // Debug: Log the actual response structure
-    console.log('🔍 Response structure:', JSON.stringify(response, null, 2).substring(0, 500));
-    
     if (response.data && response.data.length > 0) {
       const metas = response.data
         .filter(drama => !search || (drama.name && drama.name.toLowerCase().includes(search.toLowerCase())))
         .map(drama => {
-          // Debug: Log the first drama object to see its structure
-          if (response.data.indexOf(drama) === 0) {
-            console.log('🔍 First drama object:', JSON.stringify(drama, null, 2));
-          }
           
-          return {
-            id: `kisskh_${drama.id || drama.kisskhId || 'unknown'}`,
-            name: drama.nameEn || drama.name || drama.title || 'Unknown Drama',
-            type: 'series',
-            poster: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
-            posterShape: 'poster',
-            background: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
-            logo: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
-            description: `${drama.name || drama.title || 'Unknown'} (${drama.year || drama.releaseDate || 'N/A'}) - ${drama.country || 'Unknown'} ${drama.type || 'Drama'}`,
-            releaseInfo: `${drama.year || drama.releaseDate || 'N/A'} • ${drama.country || 'Unknown'} • ${drama.episodes || 'Unknown'} episodes`,
-            runtime: `${(drama.episodes || 16) * 60} min`,
-            genre: [drama.type || 'Drama', drama.country || 'Unknown'],
-            director: drama.country || 'Unknown',
-            cast: [drama.country || 'Unknown'],
-            rating: drama.rating || 7.5,
-            year: drama.year || drama.releaseDate || 2023,
-            status: drama.status || 'Completed',
-            episodes: drama.episodes || 16
-          };
+                      // Extract year from title if available (e.g., "Forever Love (2023)")
+            const yearMatch = (drama.name || drama.title || '').match(/\((\d{4})\)/);
+            const extractedYear = yearMatch ? parseInt(yearMatch[1]) : null;
+            
+            // Determine country based on title patterns
+            const isKorean = /[가-힣]/.test(drama.name || drama.title || '') || 
+                           (drama.name || drama.title || '').includes('Korea') ||
+                           (drama.name || drama.title || '').includes('Korean');
+            const isChinese = /[\u4e00-\u9fff]/.test(drama.name || drama.title || '') || 
+                             (drama.name || drama.title || '').includes('China') ||
+                             (drama.name || drama.title || '').includes('Chinese');
+            
+            const country = isKorean ? 'Korea' : isChinese ? 'China' : 'Unknown';
+            const year = extractedYear || drama.year || drama.releaseDate || 2023;
+            
+            return {
+              id: `kisskh_${drama.id || drama.kisskhId || 'unknown'}`,
+              name: drama.nameEn || drama.name || drama.title || 'Unknown Drama',
+              type: 'series',
+              poster: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
+              posterShape: 'poster',
+              background: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
+              logo: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
+              description: `${drama.name || drama.title || 'Unknown'} (${year}) - ${country} Drama`,
+              releaseInfo: `${year} • ${country} • ${drama.episodes || 16} episodes`,
+              runtime: `${(drama.episodes || 16) * 60} min`,
+              genre: [drama.type || 'Drama', country],
+              director: country,
+              cast: [country],
+              rating: drama.rating || 7.5,
+              year: year,
+              status: drama.status || 'Completed',
+              episodes: drama.episodes || 16
+            };
         });
       
       console.log(`Catalog metas: ${metas.length} items`);
@@ -1037,7 +1045,10 @@ builder.defineCatalogHandler(async ({ id, search = '', extra = {} }) => {
     }
   } catch (error) {
     console.error('Error fetching catalog:', error);
-    return { metas: [] };
+    // Return mock data as fallback
+    console.log('🔄 Using fallback mock data...');
+    const mockData = await fetchAlternativeData();
+    return { metas: mockData.data || [] };
   }
 });
 
@@ -1190,10 +1201,37 @@ async function startServer() {
     printV2rayNInstructions();
   }
   
-  serveHTTP(builder.getInterface(), {
-    port: process.env.PORT || 3000
-  })
-  .then(() => console.log('Addon running at http://127.0.0.1:3000/manifest.json'));
+  const port = process.env.PORT || 3000;
+  
+  // Check if port is already in use
+  const net = require('net');
+  const server = net.createServer();
+  
+  server.listen(port, () => {
+    server.close();
+    console.log(`✅ Port ${port} is available`);
+    
+    serveHTTP(builder.getInterface(), { port })
+      .then(() => console.log(`Addon running at http://127.0.0.1:${port}/manifest.json`))
+      .catch(err => {
+        if (err.code === 'EADDRINUSE') {
+          console.error(`❌ Port ${port} is already in use. Please kill the process using this port or use a different port.`);
+          console.log('💡 Try: netstat -ano | findstr :3000 (Windows) or lsof -i :3000 (Mac/Linux)');
+          process.exit(1);
+        } else {
+          console.error('❌ Server startup failed:', err);
+          process.exit(1);
+        }
+      });
+  });
+  
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`❌ Port ${port} is already in use. Please kill the process using this port or use a different port.`);
+      console.log('💡 Try: netstat -ano | findstr :3000 (Windows) or lsof -i :3000 (Mac/Linux)');
+      process.exit(1);
+    }
+  });
 }
 
 startServer();
