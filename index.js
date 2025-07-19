@@ -4,6 +4,7 @@ const fetch                        = require('node-fetch');
 const cloudscraper                 = require('cloudscraper');
 const tunnel                       = require('tunnel');
 const axios                        = require('axios');
+const { ProxyAgent }               = require('proxy-agent');
 const manifest                     = require('./manifest.json');
 const builder                      = new addonBuilder(manifest);
 const stringSimilarity = require('string-similarity');
@@ -11,27 +12,119 @@ const cheerio = require('cheerio');
 
 const SOURCES = { kisskh: 'https://kisskh.co' };
 
-// …the rest of your handlers (catalog, meta, stream) unchanged…
+// Enhanced proxy list with v2rayN support
+const PROXY_LIST = [
+  // Free proxies (fallback)
+  'http://103.149.162.194:80',
+  'http://103.149.162.195:80',
+  'http://103.149.162.196:80',
+  'http://103.149.162.197:80',
+  'http://103.149.162.198:80',
+  
+  // v2rayN proxy examples (replace with your actual proxy)
+  // 'http://127.0.0.1:10809',  // HTTP proxy
+  // 'socks5://127.0.0.1:10808', // SOCKS5 proxy
+  // 'http://127.0.0.1:7890',   // HTTP proxy (alternative port)
+  // 'socks5://127.0.0.1:7891'  // SOCKS5 proxy (alternative port)
+];
 
-// helper with retries and default headers
-async function fetchWithHeaders(url, retries = 2) {
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-    'Accept':     'application/json, text/plain, */*'
-  };
+// v2rayN proxy configuration
+const V2RAYN_CONFIG = {
+  enabled: false, // Set to true if you have v2rayN running
+  httpProxy: 'http://127.0.0.1:10809',
+  socks5Proxy: 'socks5://127.0.0.1:10808',
+  timeout: 10000
+};
+
+// Create proxy agents for different protocols
+function createProxyAgent(proxyUrl) {
   try {
-    return await fetch(url, { headers, timeout: 10000 });
+    if (proxyUrl.startsWith('socks5://')) {
+      return new ProxyAgent(proxyUrl);
+    } else if (proxyUrl.startsWith('http://') || proxyUrl.startsWith('https://')) {
+      return new ProxyAgent(proxyUrl);
+    }
   } catch (err) {
-    if (retries > 0) return fetchWithHeaders(url, retries - 1);
-    throw err;
+    console.warn('Failed to create proxy agent:', err.message);
   }
+  return null;
 }
 
-// Alternative data sources when KissKH is blocked
-async function fetchAlternativeData() {
-  console.log('Fetching alternative data sources...');
+// Get available proxies including v2rayN
+function getAvailableProxies() {
+  const proxies = [...PROXY_LIST];
   
-  // Mock data for popular Asian dramas
+  // Add v2rayN proxies if enabled
+  if (V2RAYN_CONFIG.enabled) {
+    proxies.push(V2RAYN_CONFIG.httpProxy, V2RAYN_CONFIG.socks5Proxy);
+  }
+  
+  return proxies.filter(Boolean);
+}
+
+// Session management for maintaining cookies
+let sessionCookies = null;
+let lastSessionTime = 0;
+const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
+
+// Initialize session with KissKH
+async function initializeSession() {
+  try {
+    console.log('🔐 Initializing session with KissKH...');
+    const response = await cloudscraper.get({
+      uri: 'https://kisskh.co/',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      },
+      gzip: true,
+      followRedirect: true,
+      followAllRedirects: true,
+      timeout: 15000
+    });
+    
+    // Extract cookies from response
+    if (response && response.headers && response.headers['set-cookie']) {
+      sessionCookies = response.headers['set-cookie'];
+      lastSessionTime = Date.now();
+      console.log('✅ Session initialized successfully');
+      return true;
+    }
+  } catch (err) {
+    console.warn('❌ Session initialization failed:', err.message);
+  }
+  return false;
+}
+
+// Check if session is still valid
+function isSessionValid() {
+  return sessionCookies && (Date.now() - lastSessionTime) < SESSION_TIMEOUT;
+}
+
+// Enhanced alternative data sources
+async function fetchAlternativeData() {
+  console.log('📡 Fetching alternative data sources...');
+  
+  // Try to scrape from alternative sites first
+  try {
+    const alternativeData = await scrapeAlternativeSites();
+    if (alternativeData && alternativeData.length > 0) {
+      console.log(`✅ Found ${alternativeData.length} items from alternative sites`);
+      return {
+        data: alternativeData,
+        total: alternativeData.length,
+        message: "Using alternative scraping sources"
+      };
+    }
+  } catch (err) {
+    console.warn('Alternative sites failed:', err.message);
+  }
+  
+  // Enhanced mock data for popular Asian dramas
   const mockDramas = [
     {
       id: 1,
@@ -152,50 +245,269 @@ async function fetchAlternativeData() {
       poster: "https://via.placeholder.com/300x450/85C1E9/FFFFFF?text=Crash+Landing+on+You",
       rating: 8.7,
       episodes: 16
+    },
+    {
+      id: 11,
+      name: "Hidden Love",
+      nameEn: "Hidden Love",
+      year: 2023,
+      country: "China",
+      type: "Drama",
+      status: "Completed",
+      poster: "https://via.placeholder.com/300x450/E74C3C/FFFFFF?text=Hidden+Love",
+      rating: 8.5,
+      episodes: 25
+    },
+    {
+      id: 12,
+      name: "Moving",
+      nameEn: "Moving",
+      year: 2023,
+      country: "Korea",
+      type: "Drama",
+      status: "Completed",
+      poster: "https://via.placeholder.com/300x450/3498DB/FFFFFF?text=Moving",
+      rating: 8.9,
+      episodes: 20
+    },
+    {
+      id: 13,
+      name: "Forever Love",
+      nameEn: "Forever Love",
+      year: 2023,
+      country: "China",
+      type: "Drama",
+      status: "Completed",
+      poster: "https://via.placeholder.com/300x450/9B59B6/FFFFFF?text=Forever+Love",
+      rating: 8.3,
+      episodes: 30
+    },
+    {
+      id: 14,
+      name: "Good Boy",
+      nameEn: "Good Boy",
+      year: 2025,
+      country: "Korea",
+      type: "Drama",
+      status: "Ongoing",
+      poster: "https://via.placeholder.com/300x450/2ECC71/FFFFFF?text=Good+Boy",
+      rating: 8.1,
+      episodes: 8
+    },
+    {
+      id: 15,
+      name: "Squid Game",
+      nameEn: "Squid Game",
+      year: 2021,
+      country: "Korea",
+      type: "Drama",
+      status: "Completed",
+      poster: "https://via.placeholder.com/300x450/F39C12/FFFFFF?text=Squid+Game",
+      rating: 8.0,
+      episodes: 9
     }
   ];
   
   return {
     data: mockDramas,
     total: mockDramas.length,
-    message: "Using alternative data source (KissKH blocked)"
+    message: "Using enhanced mock data (KissKH blocked)"
   };
 }
 
-// Simplified fetch function that uses alternative data
-async function fetchJSON(url, retries = 2) {
-  // Try KissKH first with basic cloudscraper
-  try {
-    console.log('Trying KissKH with cloudscraper...');
-    const response = await cloudscraper.get({
-      uri: url,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://kisskh.co/',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive'
-      },
-      gzip: true,
-      followRedirect: true,
-      followAllRedirects: true,
-      timeout: 15000
-    });
-    
-    const data = JSON.parse(response);
-    if (data && data.data && data.data.length > 0) {
-      return data;
+// Try to scrape from alternative Asian drama sites
+async function scrapeAlternativeSites() {
+  const sites = [
+    { name: 'DramaCool', url: 'https://www1.dramacool.one' },
+    { name: 'AsianWiki', url: 'https://asianwiki.com' },
+    { name: 'MyDramaList', url: 'https://mydramalist.com' }
+  ];
+  
+  for (const site of sites) {
+    try {
+      console.log(`🔍 Trying ${site.name}...`);
+      const data = await scrapeFromSite(site);
+      if (data && data.length > 0) {
+        return data;
+      }
+    } catch (err) {
+      console.warn(`${site.name} failed:`, err.message);
     }
-  } catch (err) {
-    console.warn('KissKH failed:', err.message);
   }
   
-  // If KissKH fails, use alternative data
-  console.log('KissKH blocked, using alternative data sources...');
-  return await fetchAlternativeData();
+  return [];
 }
 
+// Generic site scraper
+async function scrapeFromSite(site) {
+  try {
+    const response = await fetch(site.url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.5',
+        'Accept-Encoding': 'gzip, deflate',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+      },
+      timeout: 10000
+    });
+    
+    if (response.ok) {
+      const html = await response.text();
+      return parseSiteData(html, site.name);
+    }
+  } catch (err) {
+    throw new Error(`Failed to scrape ${site.name}: ${err.message}`);
+  }
+  
+  return [];
+}
+
+// Parse site data (basic implementation)
+function parseSiteData(html, siteName) {
+  // This is a basic implementation - you can enhance this based on each site's structure
+  const $ = cheerio.load(html);
+  const dramas = [];
+  
+  // Basic parsing logic - adjust based on actual site structure
+  $('a[href*="drama"], a[href*="show"], .drama-item, .show-item').each((i, el) => {
+    const title = $(el).text().trim();
+    if (title && title.length > 3) {
+      dramas.push({
+        id: i + 1,
+        name: title,
+        nameEn: title,
+        year: 2023,
+        country: "Korea",
+        type: "Drama",
+        status: "Completed",
+        poster: `https://via.placeholder.com/300x450/random/FFFFFF?text=${encodeURIComponent(title)}`,
+        rating: 7.5 + Math.random() * 1.5,
+        episodes: 16
+      });
+    }
+  });
+  
+  return dramas.slice(0, 20); // Limit to 20 items
+}
+
+// Rate limiting to avoid triggering Cloudflare
+let lastRequestTime = 0;
+const MIN_REQUEST_INTERVAL = 2000; // 2 seconds between requests
+
+async function rateLimitedRequest(fn) {
+  const now = Date.now();
+  const timeSinceLastRequest = now - lastRequestTime;
+  
+  if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
+    const waitTime = MIN_REQUEST_INTERVAL - timeSinceLastRequest;
+    console.log(`⏳ Rate limiting: waiting ${waitTime}ms...`);
+    await new Promise(resolve => setTimeout(resolve, waitTime));
+  }
+  
+  lastRequestTime = Date.now();
+  return await fn();
+}
+
+// Enhanced fetch function with better Cloudflare bypass
+async function fetchJSON(url, retries = 2) {
+  const userAgents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  ];
+
+  // Initialize session if needed
+  if (!isSessionValid()) {
+    await initializeSession();
+  }
+
+  // Try multiple strategies
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      console.log(`🔍 Attempt ${attempt + 1}: Trying KissKH with enhanced cloudscraper...`);
+      
+      const userAgent = userAgents[attempt % userAgents.length];
+      
+      // Try with proxy on second attempt
+      let cloudscraperOptions = {
+        uri: url,
+        headers: {
+          'User-Agent': userAgent,
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Referer': 'https://kisskh.co/',
+          'Origin': 'https://kisskh.co',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache',
+          'Connection': 'keep-alive',
+          'DNT': '1'
+        },
+        gzip: true,
+        followRedirect: true,
+        followAllRedirects: true,
+        timeout: 20000,
+        cloudflareTimeout: 10000,
+        cloudflareMaxTimeout: 30000,
+        challengesToSolve: 3
+      };
+
+      // Add session cookies if available
+      if (sessionCookies) {
+        cloudscraperOptions.headers['Cookie'] = sessionCookies.join('; ');
+      }
+
+      // Add proxy on second attempt
+      if (attempt === 1) {
+        const availableProxies = getAvailableProxies();
+        const proxy = availableProxies[Math.floor(Math.random() * availableProxies.length)];
+        console.log(`🌐 Using proxy: ${proxy}`);
+        
+        // Create proxy agent for advanced protocols
+        const proxyAgent = createProxyAgent(proxy);
+        if (proxyAgent) {
+          cloudscraperOptions.agent = proxyAgent;
+        } else {
+          cloudscraperOptions.proxy = proxy;
+        }
+      }
+      
+      // Use rate limiting for requests
+      const response = await rateLimitedRequest(async () => {
+        return await cloudscraper.get(cloudscraperOptions);
+      });
+      
+      const data = JSON.parse(response);
+      if (data && data.data && data.data.length > 0) {
+        console.log(`✅ Successfully fetched ${data.data.length} items from KissKH`);
+        return data;
+      }
+    } catch (err) {
+      console.warn(`❌ KissKH attempt ${attempt + 1} failed:`, err.message);
+      
+      // Reset session on failure
+      if (attempt === 2) {
+        sessionCookies = null;
+        lastSessionTime = 0;
+      }
+      
+      // Wait before retry
+      if (attempt < 2) {
+        await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
+      }
+    }
+  }
+  
+  // If all KissKH attempts fail, use alternative data
+  console.log('🚫 All KissKH attempts failed, using alternative data sources...');
+  return await fetchAlternativeData();
+}
 
 
 const MDL_API_KEY = 'YOUR_MDL_API_KEY'; // <-- Insert your MyDramaList API key here
@@ -607,6 +919,70 @@ async function isCorrectShow(dramacoolTitle, expectedImdbId) {
   return similarity > 0.8;
 }
 
+// Test v2rayN proxy connectivity
+async function testV2rayNProxy() {
+  console.log('🔍 Testing v2rayN proxy connectivity...');
+  
+  const testUrls = [
+    'http://httpbin.org/ip',
+    'https://api.ipify.org?format=json',
+    'https://httpbin.org/headers'
+  ];
+  
+  for (const proxyUrl of [V2RAYN_CONFIG.httpProxy, V2RAYN_CONFIG.socks5Proxy]) {
+    try {
+      console.log(`Testing ${proxyUrl}...`);
+      const agent = createProxyAgent(proxyUrl);
+      
+      if (!agent) {
+        console.warn(`❌ Failed to create agent for ${proxyUrl}`);
+        continue;
+      }
+      
+      const response = await fetch('https://httpbin.org/ip', {
+        agent,
+        timeout: 5000
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log(`✅ ${proxyUrl} working - IP: ${data.origin}`);
+        return true;
+      }
+    } catch (err) {
+      console.warn(`❌ ${proxyUrl} failed:`, err.message);
+    }
+  }
+  
+  console.log('❌ No v2rayN proxies working');
+  return false;
+}
+
+// Instructions for v2rayN setup
+function printV2rayNInstructions() {
+  console.log(`
+🔧 v2rayN Setup Instructions:
+1. Download v2rayN from: https://github.com/2dust/v2rayN/releases
+2. Install and configure your proxy server
+3. Enable HTTP proxy on port 10809
+4. Enable SOCKS5 proxy on port 10808
+5. Set V2RAYN_CONFIG.enabled = true in this file
+6. Restart the addon
+
+Alternative ports:
+- HTTP: 7890, 10809, 10807
+- SOCKS5: 7891, 10808, 10806
+
+To enable v2rayN support, edit the V2RAYN_CONFIG object in index.js:
+const V2RAYN_CONFIG = {
+  enabled: true, // Change this to true
+  httpProxy: 'http://127.0.0.1:10809',
+  socks5Proxy: 'socks5://127.0.0.1:10808',
+  timeout: 10000
+};
+`);
+}
+
 // ─── Catalog handler ─────────────────────────────────────────────────────
 builder.defineCatalogHandler(async ({ id, search = '', extra = {} }) => {
   const skip  = Number(extra.skip)  || 0;
@@ -620,28 +996,38 @@ builder.defineCatalogHandler(async ({ id, search = '', extra = {} }) => {
     
     const response = await fetchJSON(url);
     
+    // Debug: Log the actual response structure
+    console.log('🔍 Response structure:', JSON.stringify(response, null, 2).substring(0, 500));
+    
     if (response.data && response.data.length > 0) {
       const metas = response.data
-        .filter(drama => !search || drama.name.toLowerCase().includes(search.toLowerCase()))
-        .map(drama => ({
-          id: `kisskh_${drama.id}`,
-          name: drama.nameEn || drama.name,
-          type: 'series',
-          poster: drama.poster,
-          posterShape: 'poster',
-          background: drama.poster,
-          logo: drama.poster,
-          description: `${drama.name} (${drama.year}) - ${drama.country} ${drama.type}`,
-          releaseInfo: `${drama.year} • ${drama.country} • ${drama.episodes} episodes`,
-          runtime: `${drama.episodes * 60} min`,
-          genre: [drama.type, drama.country],
-          director: drama.country,
-          cast: [drama.country],
-          rating: drama.rating,
-          year: drama.year,
-          status: drama.status,
-          episodes: drama.episodes
-        }));
+        .filter(drama => !search || (drama.name && drama.name.toLowerCase().includes(search.toLowerCase())))
+        .map(drama => {
+          // Debug: Log the first drama object to see its structure
+          if (response.data.indexOf(drama) === 0) {
+            console.log('🔍 First drama object:', JSON.stringify(drama, null, 2));
+          }
+          
+          return {
+            id: `kisskh_${drama.id || drama.kisskhId || 'unknown'}`,
+            name: drama.nameEn || drama.name || drama.title || 'Unknown Drama',
+            type: 'series',
+            poster: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
+            posterShape: 'poster',
+            background: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
+            logo: drama.poster || drama.thumbnail || 'https://via.placeholder.com/300x450/random/FFFFFF?text=Drama',
+            description: `${drama.name || drama.title || 'Unknown'} (${drama.year || drama.releaseDate || 'N/A'}) - ${drama.country || 'Unknown'} ${drama.type || 'Drama'}`,
+            releaseInfo: `${drama.year || drama.releaseDate || 'N/A'} • ${drama.country || 'Unknown'} • ${drama.episodes || 'Unknown'} episodes`,
+            runtime: `${(drama.episodes || 16) * 60} min`,
+            genre: [drama.type || 'Drama', drama.country || 'Unknown'],
+            director: drama.country || 'Unknown',
+            cast: [drama.country || 'Unknown'],
+            rating: drama.rating || 7.5,
+            year: drama.year || drama.releaseDate || 2023,
+            status: drama.status || 'Completed',
+            episodes: drama.episodes || 16
+          };
+        });
       
       console.log(`Catalog metas: ${metas.length} items`);
       return { metas };
@@ -794,7 +1180,20 @@ builder.defineStreamHandler(async ({ id, extra }) => {
 });
 
 // ─── Start HTTP server ────────────────────────────────────────────────────
-serveHTTP(builder.getInterface(), {
-  port: process.env.PORT || 3000
-})
-.then(() => console.log('Addon running at http://127.0.0.1:3000/manifest.json'));
+async function startServer() {
+  // Test v2rayN proxy if enabled
+  if (V2RAYN_CONFIG.enabled) {
+    console.log('🔧 v2rayN proxy support enabled');
+    await testV2rayNProxy();
+  } else {
+    console.log('💡 To enable v2rayN proxy support, set V2RAYN_CONFIG.enabled = true');
+    printV2rayNInstructions();
+  }
+  
+  serveHTTP(builder.getInterface(), {
+    port: process.env.PORT || 3000
+  })
+  .then(() => console.log('Addon running at http://127.0.0.1:3000/manifest.json'));
+}
+
+startServer();
