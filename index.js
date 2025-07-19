@@ -2,6 +2,7 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const fetch                        = require('node-fetch');
 const cloudscraper                 = require('cloudscraper');
+const { HttpsProxyAgent }          = require('https-proxy-agent');
 const manifest                     = require('./manifest.json');
 const builder                      = new addonBuilder(manifest);
 const stringSimilarity = require('string-similarity');
@@ -25,33 +26,33 @@ async function fetchWithHeaders(url, retries = 2) {
   }
 }
 
-// Cloudflare-aware fetch for KissKH
+// Multiple strategies to bypass Cloudflare
 async function fetchJSON(url, retries = 2) {
-  try {
-    const response = await cloudscraper.get({
-      uri: url,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://kisskh.co/',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-        'Cache-Control': 'no-cache',
-        'Pragma': 'no-cache'
-      },
-      gzip: true,
-      followRedirect: true,
-      followAllRedirects: true
-    });
-    return JSON.parse(response);
-  } catch (err) {
-    console.warn('cloudscraper failed, trying alternative approach:', err.message);
-    if (retries > 0) return fetchJSON(url, retries - 1);
+  const strategies = [
+    // Strategy 1: Enhanced cloudscraper
+    async () => {
+      const response = await cloudscraper.get({
+        uri: url,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://kisskh.co/',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Upgrade-Insecure-Requests': '1',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        },
+        gzip: true,
+        followRedirect: true,
+        followAllRedirects: true
+      });
+      return JSON.parse(response);
+    },
     
-    // Try with different headers as fallback
-    try {
+    // Strategy 2: Different User-Agent
+    async () => {
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -68,11 +69,112 @@ async function fetchJSON(url, retries = 2) {
       });
       const text = await response.text();
       return JSON.parse(text);
-    } catch (fallbackErr) {
-      console.warn('All fetch methods failed:', fallbackErr.message);
-      throw err;
+    },
+    
+    // Strategy 3: Mobile User-Agent
+    async () => {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://kisskh.co/',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive'
+        },
+        timeout: 15000
+      });
+      const text = await response.text();
+      return JSON.parse(text);
+    },
+    
+    // Strategy 4: Minimal headers
+    async () => {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json'
+        },
+        timeout: 15000
+      });
+      const text = await response.text();
+      return JSON.parse(text);
+    },
+    
+    // Strategy 5: Proxy attempt (if available)
+    async () => {
+      // Try some free proxy servers (these may not always work)
+      const proxies = [
+        'http://proxy.freeproxylists.net:8080',
+        'http://proxy.proxy-list.download:3128'
+      ];
+      
+      for (const proxy of proxies) {
+        try {
+          const agent = new HttpsProxyAgent(proxy);
+          const response = await fetch(url, {
+            agent,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Referer': 'https://kisskh.co/'
+            },
+            timeout: 10000
+          });
+          const text = await response.text();
+          return JSON.parse(text);
+        } catch (proxyErr) {
+          console.warn(`Proxy ${proxy} failed:`, proxyErr.message);
+          continue;
+        }
+      }
+      throw new Error('All proxies failed');
+    },
+    
+    // Strategy 6: Try alternative API endpoints
+    async () => {
+      // Try different API endpoints that might be less protected
+      const alternativeUrls = [
+        url.replace('kisskh.co', 'kisskh.com'),
+        url.replace('/api/', '/v1/'),
+        url.replace('/api/', '/api/v2/')
+      ];
+      
+      for (const altUrl of alternativeUrls) {
+        try {
+          const response = await fetch(altUrl, {
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Referer': 'https://kisskh.co/'
+            },
+            timeout: 10000
+          });
+          const text = await response.text();
+          return JSON.parse(text);
+        } catch (altErr) {
+          console.warn(`Alternative URL ${altUrl} failed:`, altErr.message);
+          continue;
+        }
+      }
+      throw new Error('All alternative URLs failed');
+    }
+  ];
+  
+  for (let i = 0; i < strategies.length; i++) {
+    try {
+      console.log(`Trying strategy ${i + 1}...`);
+      return await strategies[i]();
+    } catch (err) {
+      console.warn(`Strategy ${i + 1} failed:`, err.message);
+      if (i === strategies.length - 1 && retries > 0) {
+        console.log(`Retrying... (${retries} attempts left)`);
+        return fetchJSON(url, retries - 1);
+      }
     }
   }
+  
+  throw new Error('All strategies failed');
 }
 
 
