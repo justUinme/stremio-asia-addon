@@ -2,7 +2,6 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const fetch                        = require('node-fetch');
 const cloudscraper                 = require('cloudscraper');
-const puppeteer                    = require('puppeteer');
 const manifest                     = require('./manifest.json');
 const builder                      = new addonBuilder(manifest);
 const stringSimilarity = require('string-similarity');
@@ -32,61 +31,51 @@ async function fetchJSON(url, retries = 2) {
     const response = await cloudscraper.get({
       uri: url,
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
         'Accept': 'application/json, text/plain, */*',
-        'Referer': 'https://kisskh.co/'
+        'Referer': 'https://kisskh.co/',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache'
       },
-      gzip: true
+      gzip: true,
+      followRedirect: true,
+      followAllRedirects: true
     });
     return JSON.parse(response);
   } catch (err) {
-    console.warn('cloudscraper failed, trying Puppeteer:', err.message);
+    console.warn('cloudscraper failed, trying alternative approach:', err.message);
+    if (retries > 0) return fetchJSON(url, retries - 1);
+    
+    // Try with different headers as fallback
     try {
-      return await fetchViaPuppeteer(url);
-    } catch (puppeteerErr) {
-      console.warn('Puppeteer also failed, falling back to regular fetch:', puppeteerErr.message);
-      if (retries > 0) return fetchJSON(url, retries - 1);
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Accept': 'application/json, text/plain, */*',
+          'Referer': 'https://kisskh.co/',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept-Encoding': 'gzip, deflate, br',
+          'Connection': 'keep-alive',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin'
+        },
+        timeout: 15000
+      });
+      const text = await response.text();
+      return JSON.parse(text);
+    } catch (fallbackErr) {
+      console.warn('All fetch methods failed:', fallbackErr.message);
       throw err;
     }
   }
 }
 
-// Puppeteer-based fetch as final fallback
-async function fetchViaPuppeteer(url) {
-  let browser;
-  try {
-    browser = await puppeteer.launch({
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        '--disable-gpu',
-        '--disable-web-security',
-        '--disable-features=VizDisplayCompositor'
-      ],
-      headless: true
-    });
-    
-    const page = await browser.newPage();
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-    
-    const response = await page.goto(url, { 
-      timeout: 30000, 
-      waitUntil: 'networkidle2' 
-    });
-    
-    const text = await response.text();
-    await browser.close();
-    
-    return JSON.parse(text);
-  } catch (err) {
-    if (browser) await browser.close();
-    throw err;
-  }
-}
+
 
 const MDL_API_KEY = 'YOUR_MDL_API_KEY'; // <-- Insert your MyDramaList API key here
 
