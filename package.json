@@ -10,7 +10,6 @@
     "cheerio": "^1.1.0",
     "express": "^4.21.2",
     "node-fetch": "^2.7.0",
-    "puppeteer": "^24.14.0",
     "stremio-addon-sdk": "^1.6.10",
     "string-similarity": "^4.0.4"
   },
