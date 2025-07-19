@@ -14,7 +14,7 @@
     "stremio-addon-sdk": "^1.6.10",
     "string-similarity": "^4.0.4",
     "tunnel": "^0.0.6",
-    "playwright": "^1.40.0"
+    "axios": "^1.6.0"
   },
   "keywords": [],
   "author": "",

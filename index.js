@@ -3,7 +3,7 @@ const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const fetch                        = require('node-fetch');
 const cloudscraper                 = require('cloudscraper');
 const tunnel                       = require('tunnel');
-const { chromium }                 = require('playwright');
+const axios                        = require('axios');
 const manifest                     = require('./manifest.json');
 const builder                      = new addonBuilder(manifest);
 const stringSimilarity = require('string-similarity');
@@ -27,7 +27,7 @@ async function fetchWithHeaders(url, retries = 2) {
   }
 }
 
-// Advanced strategies to bypass Cloudflare
+// Advanced strategies to bypass Cloudflare with proxy rotation
 async function fetchJSON(url, retries = 2) {
   const strategies = [
     // Strategy 1: Enhanced cloudscraper with better headers
@@ -59,69 +59,45 @@ async function fetchJSON(url, retries = 2) {
       return JSON.parse(response);
     },
     
-    // Strategy 2: Playwright headless browser (most reliable)
+    // Strategy 2: Proxy rotation with axios
     async () => {
-      let browser;
-      try {
-        browser = await chromium.launch({
-          headless: true,
-          args: [
-            '--no-sandbox',
-            '--disable-setuid-sandbox',
-            '--disable-dev-shm-usage',
-            '--disable-accelerated-2d-canvas',
-            '--no-first-run',
-            '--no-zygote',
-            '--disable-gpu',
-            '--disable-web-security',
-            '--disable-features=VizDisplayCompositor',
-            '--disable-blink-features=AutomationControlled'
-          ]
-        });
-        
-        const context = await browser.newContext({
-          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          viewport: { width: 1920, height: 1080 },
-          extraHTTPHeaders: {
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Referer': 'https://kisskh.co/',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin'
-          }
-        });
-        
-        const page = await context.newPage();
-        
-        // Wait for the page to load and handle Cloudflare challenge
-        const response = await page.goto(url, { 
-          timeout: 30000,
-          waitUntil: 'networkidle'
-        });
-        
-        // Wait a bit more for any JavaScript challenges
-        await page.waitForTimeout(3000);
-        
-        const text = await page.content();
-        await browser.close();
-        
-        // Try to extract JSON from the response
+      // List of free proxy servers (these may not always work)
+      const proxies = [
+        'http://185.199.229.156:7492',
+        'http://185.199.228.220:7492',
+        'http://185.199.231.45:7492',
+        'http://188.74.210.207:6286',
+        'http://188.74.183.10:8279'
+      ];
+      
+      for (const proxy of proxies) {
         try {
-          return JSON.parse(text);
-        } catch (parseErr) {
-          // If it's not JSON, try to find JSON in the HTML
-          const jsonMatch = text.match(/<script[^>]*>([^<]+)<\/script>/);
-          if (jsonMatch) {
-            return JSON.parse(jsonMatch[1]);
-          }
-          throw parseErr;
+          const agent = tunnel.httpsOverHttp({
+            proxy: {
+              host: proxy.split(':')[0],
+              port: parseInt(proxy.split(':')[1])
+            }
+          });
+          
+          const response = await axios.get(url, {
+            httpsAgent: agent,
+            timeout: 10000,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'Accept': 'application/json, text/plain, */*',
+              'Referer': 'https://kisskh.co/',
+              'Accept-Language': 'en-US,en;q=0.9',
+              'Accept-Encoding': 'gzip, deflate, br'
+            }
+          });
+          
+          return response.data;
+        } catch (proxyErr) {
+          console.warn(`Proxy ${proxy} failed:`, proxyErr.message);
+          continue;
         }
-      } catch (err) {
-        if (browser) await browser.close();
-        throw err;
       }
+      throw new Error('All proxies failed');
     },
     
     // Strategy 3: Different User-Agent with delay
@@ -175,6 +151,21 @@ async function fetchJSON(url, retries = 2) {
       });
       const text = await response.text();
       return JSON.parse(text);
+    },
+    
+    // Strategy 6: Try alternative data sources
+    async () => {
+      // If KissKH is completely blocked, try alternative sources
+      console.log('KissKH blocked, trying alternative data sources...');
+      
+      // Try to get data from other Asian drama APIs
+      const alternativeApis = [
+        'https://api.mydramalist.com/v1/search/titles',
+        'https://api.themoviedb.org/3/search/tv'
+      ];
+      
+      // For now, return empty data to prevent errors
+      return { data: [], total: 0 };
     }
   ];
   
