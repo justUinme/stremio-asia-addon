@@ -2,6 +2,7 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const fetch                        = require('node-fetch');
 const cloudscraper                 = require('cloudscraper');
+const puppeteer                    = require('puppeteer');
 const manifest                     = require('./manifest.json');
 const builder                      = new addonBuilder(manifest);
 const stringSimilarity = require('string-similarity');
@@ -39,8 +40,48 @@ async function fetchJSON(url, retries = 2) {
     });
     return JSON.parse(response);
   } catch (err) {
-    console.warn('cloudscraper failed, falling back to regular fetch:', err.message);
-    if (retries > 0) return fetchJSON(url, retries - 1);
+    console.warn('cloudscraper failed, trying Puppeteer:', err.message);
+    try {
+      return await fetchViaPuppeteer(url);
+    } catch (puppeteerErr) {
+      console.warn('Puppeteer also failed, falling back to regular fetch:', puppeteerErr.message);
+      if (retries > 0) return fetchJSON(url, retries - 1);
+      throw err;
+    }
+  }
+}
+
+// Puppeteer-based fetch as final fallback
+async function fetchViaPuppeteer(url) {
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--disable-gpu'
+      ],
+      headless: true
+    });
+    
+    const page = await browser.newPage();
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+    
+    const response = await page.goto(url, { 
+      timeout: 30000, 
+      waitUntil: 'networkidle2' 
+    });
+    
+    const text = await response.text();
+    await browser.close();
+    
+    return JSON.parse(text);
+  } catch (err) {
+    if (browser) await browser.close();
     throw err;
   }
 }
