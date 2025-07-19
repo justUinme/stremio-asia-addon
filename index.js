@@ -1,6 +1,7 @@
 // index.js
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const fetch                        = require('node-fetch');
+const cloudscraper                 = require('cloudscraper');
 const manifest                     = require('./manifest.json');
 const builder                      = new addonBuilder(manifest);
 const stringSimilarity = require('string-similarity');
@@ -20,6 +21,26 @@ async function fetchWithHeaders(url, retries = 2) {
     return await fetch(url, { headers, timeout: 10000 });
   } catch (err) {
     if (retries > 0) return fetchWithHeaders(url, retries - 1);
+    throw err;
+  }
+}
+
+// Cloudflare-aware fetch for KissKH
+async function fetchJSON(url, retries = 2) {
+  try {
+    const response = await cloudscraper.get({
+      uri: url,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        'Accept': 'application/json, text/plain, */*',
+        'Referer': 'https://kisskh.co/'
+      },
+      gzip: true
+    });
+    return JSON.parse(response);
+  } catch (err) {
+    console.warn('cloudscraper failed, falling back to regular fetch:', err.message);
+    if (retries > 0) return fetchJSON(url, retries - 1);
     throw err;
   }
 }
@@ -224,10 +245,9 @@ async function scrapeKissKH_API(categoryId, searchTerm, page = 1, pageSize = 10,
               + `?page=${page}&pageSize=${pageSize}`
               + `&type=1&sub=0&country=${country}&status=0&order=1`;
     console.log('🔍 KissKH JSON fetch:', url);
-    const res  = await fetchWithHeaders(url);
     let json;
     try {
-      json = await res.json();
+      json = await fetchJSON(url);
     } catch (err) {
       console.warn('KissKH returned invalid JSON (likely blocked or HTML error), skipping...');
       return [];
@@ -529,15 +549,7 @@ builder.defineMetaHandler(async ({ id }) => {
   const detailUrl = `${SOURCES.kisskh}/api/DramaList/Drama/${dramaId}?isq=false`;
   let detailJson;
   try {
-    const detailRes = await fetch(detailUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        'Accept':     'application/json, text/plain, */*',
-        'Referer':    `${SOURCES.kisskh}/Show/${dramaId}`
-      },
-      timeout: 10000
-    });
-    detailJson = await detailRes.json();
+    detailJson = await fetchJSON(detailUrl);
     if (!detailJson || !detailJson.title) throw new Error('No detail data');
   } catch (err) {
     console.error('⚠️ Detail JSON fetch/parse failed:', err);
