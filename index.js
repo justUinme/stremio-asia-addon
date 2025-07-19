@@ -2,7 +2,8 @@
 const { addonBuilder, serveHTTP } = require('stremio-addon-sdk');
 const fetch                        = require('node-fetch');
 const cloudscraper                 = require('cloudscraper');
-const { HttpsProxyAgent }          = require('https-proxy-agent');
+const tunnel                       = require('tunnel');
+const { chromium }                 = require('playwright');
 const manifest                     = require('./manifest.json');
 const builder                      = new addonBuilder(manifest);
 const stringSimilarity = require('string-similarity');
@@ -26,10 +27,10 @@ async function fetchWithHeaders(url, retries = 2) {
   }
 }
 
-// Multiple strategies to bypass Cloudflare
+// Advanced strategies to bypass Cloudflare
 async function fetchJSON(url, retries = 2) {
   const strategies = [
-    // Strategy 1: Enhanced cloudscraper
+    // Strategy 1: Enhanced cloudscraper with better headers
     async () => {
       const response = await cloudscraper.get({
         uri: url,
@@ -42,17 +43,92 @@ async function fetchJSON(url, retries = 2) {
           'Connection': 'keep-alive',
           'Upgrade-Insecure-Requests': '1',
           'Cache-Control': 'no-cache',
-          'Pragma': 'no-cache'
+          'Pragma': 'no-cache',
+          'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+          'Sec-Ch-Ua-Mobile': '?0',
+          'Sec-Ch-Ua-Platform': '"Windows"',
+          'Sec-Fetch-Dest': 'empty',
+          'Sec-Fetch-Mode': 'cors',
+          'Sec-Fetch-Site': 'same-origin'
         },
         gzip: true,
         followRedirect: true,
-        followAllRedirects: true
+        followAllRedirects: true,
+        timeout: 20000
       });
       return JSON.parse(response);
     },
     
-    // Strategy 2: Different User-Agent
+    // Strategy 2: Playwright headless browser (most reliable)
     async () => {
+      let browser;
+      try {
+        browser = await chromium.launch({
+          headless: true,
+          args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor',
+            '--disable-blink-features=AutomationControlled'
+          ]
+        });
+        
+        const context = await browser.newContext({
+          userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          viewport: { width: 1920, height: 1080 },
+          extraHTTPHeaders: {
+            'Accept': 'application/json, text/plain, */*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Referer': 'https://kisskh.co/',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'same-origin'
+          }
+        });
+        
+        const page = await context.newPage();
+        
+        // Wait for the page to load and handle Cloudflare challenge
+        const response = await page.goto(url, { 
+          timeout: 30000,
+          waitUntil: 'networkidle'
+        });
+        
+        // Wait a bit more for any JavaScript challenges
+        await page.waitForTimeout(3000);
+        
+        const text = await page.content();
+        await browser.close();
+        
+        // Try to extract JSON from the response
+        try {
+          return JSON.parse(text);
+        } catch (parseErr) {
+          // If it's not JSON, try to find JSON in the HTML
+          const jsonMatch = text.match(/<script[^>]*>([^<]+)<\/script>/);
+          if (jsonMatch) {
+            return JSON.parse(jsonMatch[1]);
+          }
+          throw parseErr;
+        }
+      } catch (err) {
+        if (browser) await browser.close();
+        throw err;
+      }
+    },
+    
+    // Strategy 3: Different User-Agent with delay
+    async () => {
+      // Add a small delay to avoid rate limiting
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
       const response = await fetch(url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -71,7 +147,7 @@ async function fetchJSON(url, retries = 2) {
       return JSON.parse(text);
     },
     
-    // Strategy 3: Mobile User-Agent
+    // Strategy 4: Mobile User-Agent
     async () => {
       const response = await fetch(url, {
         headers: {
@@ -88,7 +164,7 @@ async function fetchJSON(url, retries = 2) {
       return JSON.parse(text);
     },
     
-    // Strategy 4: Minimal headers
+    // Strategy 5: Minimal headers approach
     async () => {
       const response = await fetch(url, {
         headers: {
@@ -99,65 +175,6 @@ async function fetchJSON(url, retries = 2) {
       });
       const text = await response.text();
       return JSON.parse(text);
-    },
-    
-    // Strategy 5: Proxy attempt (if available)
-    async () => {
-      // Try some free proxy servers (these may not always work)
-      const proxies = [
-        'http://proxy.freeproxylists.net:8080',
-        'http://proxy.proxy-list.download:3128'
-      ];
-      
-      for (const proxy of proxies) {
-        try {
-          const agent = new HttpsProxyAgent(proxy);
-          const response = await fetch(url, {
-            agent,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'application/json, text/plain, */*',
-              'Referer': 'https://kisskh.co/'
-            },
-            timeout: 10000
-          });
-          const text = await response.text();
-          return JSON.parse(text);
-        } catch (proxyErr) {
-          console.warn(`Proxy ${proxy} failed:`, proxyErr.message);
-          continue;
-        }
-      }
-      throw new Error('All proxies failed');
-    },
-    
-    // Strategy 6: Try alternative API endpoints
-    async () => {
-      // Try different API endpoints that might be less protected
-      const alternativeUrls = [
-        url.replace('kisskh.co', 'kisskh.com'),
-        url.replace('/api/', '/v1/'),
-        url.replace('/api/', '/api/v2/')
-      ];
-      
-      for (const altUrl of alternativeUrls) {
-        try {
-          const response = await fetch(altUrl, {
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-              'Accept': 'application/json, text/plain, */*',
-              'Referer': 'https://kisskh.co/'
-            },
-            timeout: 10000
-          });
-          const text = await response.text();
-          return JSON.parse(text);
-        } catch (altErr) {
-          console.warn(`Alternative URL ${altUrl} failed:`, altErr.message);
-          continue;
-        }
-      }
-      throw new Error('All alternative URLs failed');
     }
   ];
   
